@@ -173,7 +173,7 @@ for(col in 4:9){ # Select the WTH column to be predicted
     line <- line + 1
   }
   
-  write.table(result, paste0("Stat_h", col-3, "/", col-2, ".txt"), 
+  write.table(result, paste0("Stat_h", col-3, "-", col-2, ".txt"), 
               sep = "\t", row.names = FALSE)
   
   write.table(ImpVar, paste0("Importance_h", col-3, ".txt"), 
