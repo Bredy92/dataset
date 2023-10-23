@@ -21,11 +21,6 @@ for(col in 4:9){ # Select the WTH column to be predicted
   Sys.sleep(0.01)
   print(col)
   
-  # Training subset for observation well 
-  train <- residual[colnames(residual)[c(1:3, col)]]
-  # Test subset for observation well
-  test <- residual[colnames(residual)[c(1:3, col + 1)]]
-  
   # Initialize table of statistical results and relative importance of input variables
   line <- 1 # Table line
   
@@ -43,6 +38,11 @@ for(col in 4:9){ # Select the WTH column to be predicted
     # To display the forecast time step
     Sys.sleep(0.01)
     print(h)
+  
+    # Training subset 
+    train <- residual[colnames(residual)[c(1:3, col)]]
+    # Test subset
+    test <- residual[colnames(residual)[c(1:3, col + 1)]]
     
     # Number of observations in dataframe
     nr <- nrow(train)
@@ -120,14 +120,14 @@ for(col in 4:9){ # Select the WTH column to be predicted
                         nodesize = 1,
                         importance = TRUE)
     
-    # Model calibration for the observation well ----------
+    # Model calibration ----------
     Predict_c <- predict(Fit, newdata = train)
     df_c <- data.frame(observed = train[ , paste0("wthT", h)] + 
                          trend[[col - 3]][25:(nrow(trend) - h)],
                        Predicted = Predict_c + 
                          trend[[col - 3]][25:(nrow(trend) - h)])
     
-    # Model validation for the h2 observation well ----------
+    # Model validation ----------
     Predict_t <- predict(Fit,  newdata = test)
     df_t <- data.frame(observed = test[ , paste0("wthT", h)] + 
                          trend[[col - 2]][25:(nrow(trend) - h)], 
