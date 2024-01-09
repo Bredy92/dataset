@@ -1,3 +1,6 @@
+# Clear working environment
+rm(list = ls())
+
 # Load packages------------------------------------
 library(randomForest)
 library(hydroGOF)
@@ -11,12 +14,14 @@ db <- read.csv("data.csv", header = TRUE, sep = ";", dec = ".",
 
 # Data transformation
 # TRENDS AND RESIDUALS IN TIME SERIES
-residual <- cbind(db[1:3], apply(db[-(1:3)], 2, detrend))
-trend <- db[-(1:3)] - residual[-(1:3)] 
+residual <- db %>% select(starts_with("h")) %>% apply(2, detrend) %>% 
+  data.frame()
 
+trend <- db %>% select(starts_with("h")) - residual
 
-for(col in 4:9){ # Select the WTH column to be predicted
-  
+# Select the WTH column to be predicted
+for(col in 1:6){ 
+
   # To display the 'WTH' column that trains the model
   Sys.sleep(0.01)
   print(col)
@@ -30,110 +35,88 @@ for(col in 4:9){ # Select the WTH column to be predicted
                                       c("RMSE", "r2", "a", "b", "NSE")))
   
   # Importance of input variables table
-  ImpVar <- matrix(0 , nrow = 3, ncol = 4)
+  ImpVar <- matrix(0, nrow = 3, ncol = 4)
   colnames(ImpVar) <- c("Hour", "wth", "P", "etp")
   
-  for(h in c(1, 12, 24)){ # Time steps to be forecasted h = 1, 12, and 24 hours
+  # Time steps to be forecasted h = 1, 12, and 24 hours
+  for(h in c(1, 12, 24)){ 
     
     # To display the forecast time step
     Sys.sleep(0.01)
     print(h)
-  
-    # Training subset 
-    train <- residual[colnames(residual)[c(1:3, col)]]
-    # Test subset
-    test <- residual[colnames(residual)[c(1:3, col + 1)]]
     
-    # Number of observations in dataframe
-    nr <- nrow(train)
+    # Training subset : observation well
+    train <- db %>% select(etp, P) %>% mutate(wth = residual[[col]])
     
-    # Training subset of Random Forest 
-    # Rename water table height column : wth
-    names(train)[4] <- "wth"
+    # Test subset for nearest neighbor observation well
+    test <- db %>% select(etp, P) %>% mutate(wth = residual[[col + 1]])
     
+    # Training subset for Random Forest 
     # Next step of output variable : WTH
-    train[ , paste0("wthT", h)] <- train$wth[h+1:nr]
+    train <- train %>% mutate(!!paste0("wthT", h) := lead(wth, h, default = NA))
     
+    # Next step of precipitation and, evapotranspiration ------
     for (i in h:1) {
-      # Next step of precipitation
-      train[ , paste0("PT",i)] <- train$P[i+1:nr] 
-      
-      # Next step of evapotranspiration
-      train[ , paste0("etpT",i)] <- train$etp[i+1:nr]
-    }
+      train <- train %>% mutate(!!paste0("PT", i) := lead(P, i, default = NA), 
+                                !!paste0("etpT", i) := lead(etp, i, default = NA))
+    } 
     
-    # Previous time step of input variables
-    for (j in 1:24) {
-      # Previous time step of WTH ------
-      train[(j+1):nr , paste0("wthTm", j)] <- train$wth[1:(nr-j)]
-      
-      # Previous time step of precipitation ------
-      train[(j+1):nr , paste0("PTm", j)] <- train$P[1:(nr-j)]  
-      
-      # Previous time step of evapotranspiration ------
-      train[(j+1):nr , paste0("etpTm", j)] <- train$etp[1:(nr-j)]
+    # Previous time step of WTH ------
+    for (j in 1:23) {
+      train <- train %>%
+        mutate(!!paste0("wthTm", j) := lag(wth, j, default = NA),
+               !!paste0("PTm", j) := lag(P, j, default = NA),
+               !!paste0("etpTm", j) := lag(etp, j, default = NA))
     }
     
     # Eliminate NA observations
-    train <- train[complete.cases(train),]
+    train <- train %>% slice(24:(nrow(train)-h))
     
-    # Test subset of Random Forest
-    # Rename water table height column : wth
-    names(test)[4] <- "wth"
+    # Test subset for Random Forest
+    # Next step of output variable : WTH
+    test <- test %>% mutate(!!paste0("wthT", h) := lead(wth, h, default = NA))
     
-    # Next step of output variable :  WTH
-    test[ , paste0("wthT", h)] <- test$wth[h+1:nr]
-    
-    # Next step of input variables 
+    # Next step of precipitation and, evapotranspiration ------
     for (i in h:1) {
-      # Next step of precipitation ------
-      test[ , paste0("PT",i)] <- test$P[i+1:nr]
-      
-      # Next step of ETP ------
-      test[ , paste0("etpT",i)] <- test$etp[i+1:nr]
-    }
+      test <- test %>% mutate(!!paste0("PT",i) := lead(P, i, default = NA), 
+                              !!paste0("etpT",i) := lead(etp, i, default = NA))
+    } 
     
-    # Previous time step of input variables
-    for (j in 1:24) {
-      # Previous time step of WTH ------
-      test[(j+1):nr , paste0("wthTm", j)] <- test$wth[1:(nr-j)]
-      
-      # Previous time step of precipitation ------
-      test[(j+1):nr , paste0("PTm", j)] <- test$P[1:(nr-j)]
-      
-      # Previous time step of ETP ------
-      test[(j+1):nr , paste0("etpTm", j)] <- test$etp[1:(nr-j)]
+    # Previous time step of WTH ------
+    for (j in 1:23) {
+      test <- test %>%
+        mutate(!!paste0("wthTm", j) := lag(wth, j, default = NA),
+               !!paste0("PTm", j) := lag(P, j, default = NA),
+               !!paste0("etpTm", j) := lag(etp, j, default = NA))
     }
     
     # Eliminate NA observations
-    test <- test[complete.cases(test),]
-    rm(i, j, nr) # Useless object
+    test <- test %>% slice(24:(nrow(test)-h))
+    
+    rm(i, j) # Useless object
     
     # Model training
     set.seed(985)                                             
-    Fit <- randomForest(as.formula(paste0("wthT", h, "~", 
-                                          paste(colnames(train)[c(6:(2*h + 5), 4:2, 
-                                                                  (2*h + 6):ncol(train))], 
-                                                collapse = "+"))),
-                        data = train,
-                        ntree = 1000, 
-                        nodesize = 1,
-                        importance = TRUE)
     
-    # Model calibration ----------
-    Predict_c <- predict(Fit, newdata = train)
-    df_c <- data.frame(observed = train[ , paste0("wthT", h)] + 
-                         trend[[col - 3]][25:(nrow(trend) - h)],
-                       Predicted = Predict_c + 
-                         trend[[col - 3]][25:(nrow(trend) - h)])
+    Fit <- paste0("wthT", h, "~",paste(colnames(train)[-4], collapse = "+")) %>% 
+      formula %>% randomForest(data = train,
+                               ntree = 1000,
+                               nodesize = 1,
+                               importance = TRUE)
     
-    # Model validation ----------
-    Predict_t <- predict(Fit,  newdata = test)
-    df_t <- data.frame(observed = test[ , paste0("wthT", h)] + 
-                         trend[[col - 2]][25:(nrow(trend) - h)], 
-                       Predicted = Predict_t + 
-                         trend[[col - 2]][25:(nrow(trend) - h)])
+    # Model calibration for the observation well ----------
+    Predict_c <- Fit %>% predict(newdata = train)
     
+    df_c <- train %>% transmute(Observed =!!sym(paste0("wthT", h)),
+                                Predicted = Predict_c) + trend %>% select(col) %>% 
+      slice((24+h):nrow(trend)) %>% pull()
+    
+    # Model validation for the h2 observation well ----------
+    Predict_t <- Fit %>% predict(newdata = test)
+    
+    df_t <- test %>% transmute(Observed =!!sym(paste0("wthT", h)),
+                               Predicted = Predict_t) + trend %>% select(col+1) %>% 
+      slice((24+h):nrow(trend)) %>% pull()
     # Statistical values of RMSE, R2, and NSE for the model calibration and validation
     stat_c <- as.data.frame(t(gof(df_c[[2]], df_c[[1]])))
     stat_t <- as.data.frame(t(gof(df_t[[2]], df_t[[1]])))
@@ -158,25 +141,25 @@ for(col in 4:9){ # Select the WTH column to be predicted
     ImpVar[line, 1] <- h
     # height of water table to water level in drains
     ImpVar[line, 2] <- 100*((Fit %>% importance)[ , 2] %>% t %>% data.frame %>% 
-                  select(starts_with("wth")) %>% 
-                  rowSums())/(Fit %>% importance)[ , 2] %>% sum()
+                              select(starts_with("wth")) %>% 
+                              rowSums())/(Fit %>% importance)[ , 2] %>% sum()
     # Precipitation
     ImpVar[line, 3] <- 100*((Fit %>% importance)[ , 2] %>% t %>% data.frame %>% 
-                select(starts_with("P")) %>% 
-                rowSums())/(Fit %>% importance)[ , 2] %>% sum()
+                              select(starts_with("P")) %>% 
+                              rowSums())/(Fit %>% importance)[ , 2] %>% sum()
     
     # Evapotranspiration
     ImpVar[line, 4] <- 100*((Fit %>% importance)[ , 2] %>% t %>% data.frame %>% 
-                  select(starts_with("etp")) %>% 
-                  rowSums())/(Fit %>% importance)[ , 2] %>% sum()
+                              select(starts_with("etp")) %>% 
+                              rowSums())/(Fit %>% importance)[ , 2] %>% sum()
     
     line <- line + 1
   }
   
-  write.table(result, paste0("Stat_h", col-3, "-", col-2, ".txt"), 
+   write.table(result, paste0("Stat_h", col, "-", col+1, ".txt"), 
               sep = "\t", row.names = FALSE)
   
-  write.table(ImpVar, paste0("Importance_h", col-3, ".txt"), 
-              sep = "\t", row.names = FALSE)
+   write.table(ImpVar, paste0("Importance_h", "column-", col, ".txt"), 
+             sep = "\t", row.names = FALSE)
 }
 
